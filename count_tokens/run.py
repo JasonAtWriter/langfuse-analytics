@@ -7,6 +7,7 @@ Arguments:
     --start / --from    ISO 8601 timestamp, or relative offset like -1w, -3d, -6h, -30m
     --end / --until     ISO 8601 timestamp, relative offset like -1w, -3d, -6h, -30m,
                         or relative to start like start+1w, start+3d, start+6h, start+30m
+    -o / --output       Optional location to write the results, otherwise prints to console
 
 Examples:
     uv run python -m count_tokens.run --start -1w --end -6d
@@ -25,11 +26,15 @@ from dotenv import load_dotenv
 from langfuse import get_client
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+TARGET_OBSERVATION_NAME = (
+    "enterprise_knowledge_core.reranker.preprocessor.ColbertPreprocessor.select_chunks"
+)
 
 
 def main():
-    start_time, end_time = parse_args()
+    start_time, end_time, output = parse_args()
     client = get_client()
 
     # Get initial page
@@ -42,7 +47,7 @@ def main():
         order_by="timestamp.desc",
     )
     if paginated_traces.meta.total_pages == 0:
-        print("No items found in given time range!")
+        logger.info("No items found in given time range!")
         return
 
     # Read all remaining pages
@@ -58,14 +63,14 @@ def main():
             order_by="timestamp.desc",
         )
         all_trace_ids.extend([trace.id for trace in paginated_traces.data])
+    logger.info(f"Found {len(all_trace_ids)} traces")
 
     # Get relevant logged data
     logged_data: list[LoggedPreprocessorData] = []
-    target_observation_name = "enterprise_knowledge_core.reranker.preprocessor.ColbertPreprocessor.select_chunks"
     for trace_id in all_trace_ids:
         trace_with_full_details = client.api.trace.get(trace_id=trace_id)
         for observation in trace_with_full_details.observations:
-            if observation.name == target_observation_name:
+            if observation.name == TARGET_OBSERVATION_NAME:
                 try:
                     attributes = observation.metadata["attributes"]
                     data = LoggedPreprocessorData(
@@ -80,12 +85,19 @@ def main():
                         f"Preprocessor data could not be parsed: {json.dumps(observation.metadata)}"
                     )
                     logger.error(str(e))
-    print(json.dumps([ld.asdict() for ld in logged_data], indent=2))
+
+    # Write results
+    results = [ld.asdict() for ld in logged_data]
+    if output is None:
+        print(json.dumps(results, indent=2))
+    else:
+        with open(output, "w") as f:
+            json.dump(results, f, indent=2)
 
     client.shutdown()
 
 
-def parse_args() -> tuple[datetime, datetime]:
+def parse_args() -> tuple[datetime, datetime, str | None]:
     parser = argparse.ArgumentParser(
         description="Download search traces in a timeframe, defaults to past hour."
     )
@@ -103,6 +115,12 @@ def parse_args() -> tuple[datetime, datetime]:
         help="End time: ISO 8601 format, relative offset like -1w, -3d, -6h, -30m, "
         "or relative to start like start+1w, start+3d (default: start+1h)",
         dest="end",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        default=None,
+        help="Output file to write the results to",
     )
     args = parser.parse_args()
 
@@ -134,7 +152,7 @@ def parse_args() -> tuple[datetime, datetime]:
     if start_time > end_time:
         raise ValueError("START must be less than or equal to END")
 
-    return start_time, end_time
+    return start_time, end_time, args.output
 
 
 if __name__ == "__main__":
