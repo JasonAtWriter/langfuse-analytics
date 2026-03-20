@@ -8,4 +8,6 @@ dependencies = [
     "dotenv>=0.9.9",
     "jupyter>=1.1.1",
     "langfuse>=4.0.0",
+    "matplotlib>=3.10.8",
+    "pytest>=9.0.2",
 ]
