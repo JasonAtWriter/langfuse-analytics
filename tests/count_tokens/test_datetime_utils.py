@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from count_tokens.datetime_utils import (
     parse_end_relative_to_start,
     parse_relative_offset,
+    split_time_range,
 )
 
 
@@ -60,3 +61,35 @@ class TestParseEndRelativeToStart:
 
     def test_relative_offset_not_matched(self):
         assert parse_end_relative_to_start("-1d", self.START) is None
+
+
+class TestSplitTimeRange:
+    START = datetime(2026, 1, 1, 0, 0, 0)
+    END = datetime(2026, 1, 8, 0, 0, 0)  # 7 days later
+
+    def test_single_chunk_returns_full_range(self):
+        chunks = split_time_range(self.START, self.END, 1)
+        assert chunks == [(self.START, self.END)]
+
+    def test_seven_chunks_cover_full_range(self):
+        chunks = split_time_range(self.START, self.END, 7)
+        assert len(chunks) == 7
+        assert chunks[0][0] == self.START
+        assert chunks[-1][1] == self.END
+
+    def test_chunks_are_contiguous(self):
+        chunks = split_time_range(self.START, self.END, 7)
+        for i in range(len(chunks) - 1):
+            assert chunks[i][1] == chunks[i + 1][0]
+
+    def test_chunks_are_equal_size(self):
+        chunks = split_time_range(self.START, self.END, 7)
+        sizes = [end - start for start, end in chunks]
+        assert all(s == sizes[0] for s in sizes)
+
+    def test_two_chunks(self):
+        chunks = split_time_range(self.START, self.END, 2)
+        assert len(chunks) == 2
+        mid = datetime(2026, 1, 4, 12, 0, 0)
+        assert chunks[0] == (self.START, mid)
+        assert chunks[1] == (mid, self.END)
